@@ -1,0 +1,1 @@
+place the cook_spot.txt file in your sps folder
