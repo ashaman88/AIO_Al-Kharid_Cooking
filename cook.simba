@@ -1,0 +1,318 @@
+program cooking;
+{$DEFINE SMART}
+{$I SRL-6/SRL.simba}
+{$I sps/lib/sps-rs3.simba}
+
+var
+  _totalEXP, food_cooked, food_burnt: integer;
+  cook_walk: TSPSArea;
+  paths: T2DPointArray;
+
+const
+  USE_DirectX = true;
+
+procedure declarePlayers;
+begin
+  setLength(players, 1);
+  with players[0] do
+  begin
+    loginName   := '';
+    bankPin     := '';
+    password    := '';
+    integers[0] := 2;//slot containing food to cook
+    extendeds[0]:= 210;//exp per item
+    isActive    := true;
+    isMember    := true;
+    world       := -1;
+  end;
+  currentPlayer := 0;
+end;
+
+procedure initPaths;
+begin
+  cook_walk.setup('cook_spot', '', __DEFAULT_ACCURACY, __DEFAULT_TOLERANCE, 0.7);
+  setLength(paths, 3);
+  //to bank
+  paths[0] := [Point(90, 164), Point(94, 171), Point(102, 178), Point(114, 173), Point(117, 159), Point(119, 141), Point(114, 119), Point(110, 107), Point(95, 104)];
+
+  //to the north dock
+  paths[1] := [Point(97, 166), Point(97, 173), Point(98, 179), Point(123, 180), Point(126, 152), Point(114, 136), Point(112, 116), Point(98, 106)];
+
+  //to the south dock
+  paths[2] := [Point(94, 166), Point(118, 162), Point(118, 144), Point(104, 124), Point(97, 109), Point(94, 104)];
+end;
+
+function location: TPoint;
+var
+  places: TPointArray;
+  bankD, rangeD: integer;
+begin
+  result := cook_walk.getPlayerPos;
+  players[currentPlayer].location := '';
+  if result.equals([-1, -1]) then exit;
+
+  rangeD := distance(result, Point(95, 104));
+  bankD := distance(result, Point(90, 164));
+
+  if (rangeD < 15) then players[currentPlayer].location := 'range' else
+    if (bankD < 15) then players[currentPlayer].location := 'bank';
+  status(players[currentPlayer].location);
+end;
+
+function walk(bank: boolean): boolean;
+var
+  our_path: TPointArray;
+  ourPos: TPoint;
+  threshold: integer;
+  n: integer;
+begin
+  ourPos := location;
+  if ourPos.equals([-1, -1]) then exit;
+
+  our_path := paths[random(length(paths))].copy;
+  if bank then invertTPA(our_path);
+
+  threshold := getSystemTime + randomRange(45000, 65000);
+  repeat
+    if cook_walk.walkPath(our_path) then minimap.waitPlayerMoving();
+    wait(randomRange(250, 500));
+    ourPos := location;
+  until ((distance(our_path[high(our_path)], ourPos) < 12)) or (getSystemTime > threshold);
+  result := (threshold > getSystemTime);
+end;
+
+//this function returns the closest point in the array to the center of the arra
+function TPointArray.centerPoint(): TPoint;
+var
+  tmpArray: TPointArray;
+begin
+  if length(self) < 1 then exit;
+  tmpArray := self;
+  tmpArray.sortFromPoint(self.getMiddle);
+  result := tmpArray[0];
+end;
+
+
+//This just ensures that the option window gets closed
+function TRSChooseOption.close2(): boolean;
+var
+  t: integer;
+begin
+  t := getSystemTime + randomRange(2000,3000);
+  while (t > getSystemTime) do if self.isOpen then self.close else exit(true);
+end;
+
+//This function will find all colors close to the range color and split them into
+//TPA's by width and height, a use range function will call this one
+function findRange: T2DPointArray;
+var
+  rangeTPA: TPointArray;
+begin
+  if findColorsTolerance(rangeTPA, 3359630, mainscreen.getBounds, 4, colorSetting(2, 0.06, 0.53)) then
+    result := rangeTPA.toATPA(15, 15);
+  sortATPAFromMidPoint(result, mainscreen.playerPoint);
+end;
+
+function useRange: boolean;
+var
+  range: T2DPointArray;
+  pont: TPoint;
+  i, h, timer: integer;
+begin
+  range := findRange;
+  if (length(range) < 1) then exit;
+  h := high(range);
+  for i := 0 to h do
+  begin
+    if productionScreen.isOpen then exit(productionScreen.clickStart);
+    if (length(range[i]) < 5) then continue;
+    pont := range[i].centerPoint;
+    mouse(pont.rand(-3, 3), Mouse_Right, Mouse_Human);
+    if chooseOption.select(['-> Range'], randomRange(1000, 4000)) then
+    begin
+      minimap.waitPlayerMoving();
+      timer := getSystemTime + randomRange(3000, 6000);
+      repeat
+        wait(randomRange(100, 400));
+      until (productionScreen.isOpen) or (getSystemTime > timer);
+    end;
+  end else chooseOption.close2;
+end;
+
+function doneButton: boolean;
+var
+  bluePoints: TPointArray;
+  blueArea: TBox;
+begin
+  blueArea := [244,197, 335, 223];
+  findColorsTolerance(bluePoints, 13278759, blueArea, 44);
+  result := length(bluePoints) > 145;
+end;
+
+procedure whileCooking;
+var
+  blkCount: TPointArray;
+  count, threshold: integer;
+begin
+  threshold := getSystemTime + randomRange(70000, 80000);
+  repeat
+    wait(randomRange(255, 555));
+    if doneButton then
+    begin
+      threshold := getSystemTime + randomRange(2500, 3500);
+      repeat
+        wait(randomRange(255, 555));
+        if not(doneButton) then exit;
+      until (getSystemTime > threshold);
+    end;
+  until (getSystemTime > threshold);
+end;
+
+//This function will find all colors close to the banker color and split them into
+//TPA's by width and height, a use bank function will call this one
+function findBankers: T2DPointArray;
+var
+  bankerTPA: TPointArray;
+begin
+  if findColorsTolerance(bankerTPA, 2450798, mainscreen.getBounds, 14, colorSetting(2, 0.09, 1.31)) then
+    result := bankerTPA.toATPA(15, 15);
+  sortATPAFromMidPoint(result, mainscreen.playerPoint);
+end;
+
+function useBank: boolean;
+var
+  bankers: T2DPointArray;
+  pont: TPoint;
+  i, h, timer: integer;
+begin
+  bankers := findBankers;
+  if (length(bankers) < 1) then exit;
+  h := high(bankers);
+  for i := 0 to h do
+  begin
+    if (length(bankers[i]) < 5) then continue;
+    pont := bankers[i].centerPoint;
+    mouse(pont.rand(-3, 3), Mouse_Right, Mouse_Human);
+    if chooseOption.select(['Bank Banker', 'Bank Bank', 'nk Banker'], randomRange(1000, 4000)) then
+    begin
+      minimap.waitPlayerMoving();
+      timer := getSystemTime + randomRange(3000, 6000);
+      repeat
+        wait(randomRange(100, 400));
+      until (bankscreen.isOpen) or (pinscreen.isOpen) or (getSystemTime > timer);
+      if pinscreen.isOpen then pinScreen.enter(players[currentPlayer].bankPin);
+      if bankscreen.isOpen then exit(true);
+    end else chooseOption.close2;
+  end;
+end;
+
+function cook_count: TPoint
+var
+  i, invcount, x, y: integer;
+  clrFound: boolean;
+begin
+  tabBackpack.open;
+  invcount := tabBackpack.count;
+  clrFound := findColor(x, y, 65535, tabBackpack.getBounds);
+  case invcount of
+    0: result := [0, 0];
+    1..27: result := [invcount-1, 29-invcount];
+    28: if clrFound then result := [27, 1] else result := [28, 0];
+  end;
+end;
+
+procedure printProgress;
+var
+  secondsElapsed, expPHour, totalEXP: extended;
+  food: TPoint;
+begin
+  food := cook_count;
+
+  food_cooked := food_cooked + food.x;
+  food_burnt := food_burnt + food.y;
+
+  totalEXP := food_cooked * players[currentPlayer].extendeds[0];
+  secondsElapsed := (getTimeRunning/1000);
+  expPHour := (totalEXP * 60 * 60) / secondsElapsed;
+
+  smartImage.clearArea(intToBox(576, 200, 798, 278));
+  smartImage.drawBox(intToBox(576, 200, 798, 278), true, 7890014);
+
+  smartImage.DrawText('Run Time: ' + msToTime(GetTimeRunning, TIME_SHORT), Point(618, 224), upchars, false, 1376386);
+  smartImage.DrawText('EXP/Hour: ' + toString(round(expPHour)), Point(618, 234), upchars, false, 1376386);
+  smartImage.DrawText('Total EXP: ' + toString(totalEXP), Point(618, 244), upchars, false, 1376386);
+  smartImage.DrawText('Items cooked: ' + toString(food_cooked), Point(618, 254), upchars, false, 1376386);
+  smartImage.DrawText('Items burnt: ' + toString(food_burnt), Point(618, 264), upchars, false, 1376386);
+end;
+
+function handleBanking: boolean;
+begin
+  printProgress;
+  if waitFunc(@useBank, 100, randomRange(20000,30000)) then
+  begin
+    bankscreen.quickDeposit(QUICK_DEPOSIT_INVENTORY);
+    if bankscreen.withdraw(players[currentPlayer].integers[0], WITHDRAW_AMOUNT_ALL_BUT_ONE, ['']) then
+      result := bankscreen.close;
+  end;
+end;
+
+procedure prepareSelf;
+begin
+  wait(random(500, 1500));
+  minimap.clickCompass;
+  wait(random(500, 1500));
+  mainscreen.setAngle(MS_ANGLE_HIGH);
+  wait(random(1, 1500));
+end;
+
+procedure mainLoop;
+var
+  loc: TPoint;
+begin
+
+  if not isLoggedIn then
+  begin
+    print('We''re not logged in. respawning client.');
+    wait(randomRange(5000, 10000));
+    smartReloadClient((5 * 60000) + random(15000));
+
+    if (waitClientReady()) then
+    begin
+      print('Client succesfully loaded after reload');
+    end else
+    begin
+      print('Client never reloaded after restart..', TDebug.FATAL);
+      terminateScript;
+    end;
+    if not players[currentPlayer].isActive then players.next(false);
+    if players[currentPlayer].login then prepareSelf;
+    if not isLoggedIn then
+    begin
+      writeln('Terminating, not logged in.');
+      terminateScript;
+    end;
+  end;
+
+  loc := location;
+  if loc.equals([-1, -1]) then exit;
+  wait(randomRange(1, 300));
+  if walk(true) then
+    if handleBanking then
+      if walk(false) then
+        if tabBackpack.mouseSlot(randomRange(10, 28), mouse_left) then
+          if useRange then whileCooking;
+end;
+
+begin
+
+  if USE_DirectX then smartPlugins := ['d3d9.dll'];
+
+  smartEnableDrawing := true;
+  setupsrl;
+  declarePlayers;
+  initPaths;
+
+  if not isLoggedIn then if players[currentPlayer].login then prepareSelf;
+
+  while players.getActive > 0 do mainLoop;
+end.
