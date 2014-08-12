@@ -108,7 +108,7 @@ function findRange: T2DPointArray;
 var
   rangeTPA: TPointArray;
 begin
-  if findColorsTolerance(rangeTPA, 3359630, mainscreen.getBounds, 4, colorSetting(2, 0.06, 0.53)) then
+  if findColorsTolerance(rangeTPA, 3162322, mainscreen.getBounds, 10, colorSetting(2, 0.16, 2.42)) then
     result := rangeTPA.toATPA(15, 15);
   sortATPAFromMidPoint(result, mainscreen.playerPoint);
 end;
